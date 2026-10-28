@@ -1,0 +1,99 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-primary: #1a3a6b;
+  --color-primary-light: #2a5298;
+  --color-primary-dark: #0f2340;
+  --color-accent: #ffd700;
+  --color-accent-dark: #e6c200;
+  --color-bg: #f0f3ff;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f8faff;
+  --color-text: #1a1a2e;
+  --color-text-secondary: #4a5568;
+  --color-border: #e2e8f0;
+  --color-success: #22c55e;
+  --color-error: #ef4444;
+  --color-warning: #f59e0b;
+}
+
+.dark {
+  --color-primary: #3b6db5;
+  --color-primary-light: #5a8ad4;
+  --color-primary-dark: #1a3a6b;
+  --color-accent: #ffd700;
+  --color-accent-dark: #ccac00;
+  --color-bg: #0b172b;
+  --color-surface: #152e55;
+  --color-surface-hover: #1c3a6b;
+  --color-text: #e8edf5;
+  --color-text-secondary: #a0b0c8;
+  --color-border: #2a4a7a;
+  --color-success: #4ade80;
+  --color-error: #f87171;
+  --color-warning: #fbbf24;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  transition: background-color 0.3s ease, color 0.3s ease;
+  min-height: 100vh;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--color-bg); }
+::-webkit-scrollbar-thumb { background: var(--color-primary); border-radius: 3px; }
+
+/* Anti-cheat: disable selection and context menu in exam area */
+.exam-active {
+  -webkit-user-select: none;
+  user-select: none;
+}
+.exam-active * {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Theme transition overlay for circle reveal effect */
+.theme-transition-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 9999;
+  pointer-events: none;
+  clip-path: circle(0% at 50% 50%);
+}
+.theme-transition-overlay.expanding {
+  animation: circleExpand 0.6s ease-in-out forwards;
+}
+
+@keyframes circleExpand {
+  from { clip-path: circle(0% at var(--cx) var(--cy)); }
+  to { clip-path: circle(150% at var(--cx) var(--cy)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-transition-overlay.expanding {
+    animation: none;
+    clip-path: circle(150% at var(--cx) var(--cy));
+  }
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

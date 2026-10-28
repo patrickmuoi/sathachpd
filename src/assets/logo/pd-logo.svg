@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e3a8a" />
+      <stop offset="50%" stop-color="#172554" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a" />
+      <stop offset="50%" stop-color="#eab308" />
+      <stop offset="100%" stop-color="#ca8a04" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+
+  <!-- Outer Shield Shadow & Border -->
+  <path d="M100 12 L178 48 C178 122 135 168 100 188 C65 168 22 122 22 48 Z" 
+        fill="url(#goldGrad)" filter="url(#glow)"/>
+  
+  <!-- Main Shield Body -->
+  <path d="M100 20 L170 52 C170 118 130 160 100 178 C70 160 30 118 30 52 Z" 
+        fill="url(#shieldGrad)"/>
+
+  <!-- Inner Gold Rim -->
+  <path d="M100 26 L164 56 C164 114 126 154 100 170 C74 154 36 114 36 56 Z" 
+        fill="none" stroke="url(#goldGrad)" stroke-width="2" stroke-opacity="0.6"/>
+
+  <!-- Top Banner / Star Area -->
+  <!-- 7-Point Police Star -->
+  <g transform="translate(100, 92) scale(0.68)">
+    <polygon points="0,-60 15,-18 58,-18 24,10 38,52 0,26 -38,52 -24,10 -58,-18 -15,-18" 
+             fill="url(#goldGrad)" stroke="#854d0e" stroke-width="2"/>
+    <!-- Center Seal circle -->
+    <circle cx="0" cy="5" r="22" fill="#172554" stroke="url(#goldGrad)" stroke-width="2"/>
+    <!-- Scale of Justice / Eagle / Emblem placeholder -->
+    <path d="M -10 5 L 10 5 M 0 -5 L 0 15 M -7 11 L -13 11 M 7 11 L 13 11" 
+          stroke="url(#goldGrad)" stroke-width="2.5" stroke-linecap="round"/>
+  </g>
+
+  <!-- Department Text -->
+  <path id="curve" d="M 45 68 Q 100 48 155 68" fill="none"/>
+  <text font-family="'Inter', system-ui, sans-serif" font-size="11" font-weight="900" fill="url(#goldGrad)" letter-spacing="2">
+    <textPath href="#curve" startOffset="50%" text-anchor="middle">
+      POLICE DEPARTMENT
+    </textPath>
+  </text>
+
+  <!-- Bottom Banner with P.D. -->
+  <rect x="55" y="142" width="90" height="20" rx="4" fill="url(#goldGrad)" stroke="#854d0e" stroke-width="1"/>
+  <text x="100" y="157" text-anchor="middle" font-family="'Inter', system-ui, sans-serif" font-weight="900" 
+        font-size="14" fill="#0f172a" letter-spacing="3">PORTAL</text>
+</svg>
+

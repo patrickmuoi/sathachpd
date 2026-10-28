@@ -237,6 +237,9 @@ export default function AccountCreate() {
                   <span>{copied ? 'Đã sao chép' : 'Sao chép mật khẩu'}</span>
                 </button>
               </div>
+              <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-2 font-medium">
+                💡 Sĩ quan có thể đăng nhập bằng mật khẩu này hoặc mật khẩu dự phòng hệ thống <strong className="font-mono bg-emerald-500/15 px-1 py-0.5 rounded">123456</strong>.
+              </p>
             </div>
           </div>
 

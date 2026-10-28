@@ -376,6 +376,7 @@ function setStorage<T>(key: string, val: T): void {
 class MockDatabase {
   departments: Department[] = this.migrateDepartments(getStorage('departments', INITIAL_DEPARTMENTS));
   users: User[] = this.migrateUsers(getStorage('users', INITIAL_USERS));
+  passwords: Record<string, string> = getStorage('passwords', { 'user-admin': '123456' });
   ranks: Rank[] = this.migrateRanks(getStorage('ranks', INITIAL_RANKS));
   exams: Exam[] = this.migrateExams(getStorage('exams', INITIAL_EXAMS));
   assignments: ExamAssignment[] = getStorage('assignments', INITIAL_ASSIGNMENTS);
@@ -451,6 +452,7 @@ class MockDatabase {
   save() {
     setStorage('departments', this.departments);
     setStorage('users', this.users);
+    setStorage('passwords', this.passwords);
     setStorage('ranks', this.ranks);
     setStorage('exams', this.exams);
     setStorage('assignments', this.assignments);

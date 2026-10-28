@@ -11,13 +11,14 @@
     "db:seed": "node db/seed.mjs"
   },
   "dependencies": {
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1",
-    "react-router-dom": "^7.6.1",
+    "@supabase/supabase-js": "^2.118.0",
     "i18next": "^25.1.3",
-    "react-i18next": "^15.6.1",
     "i18next-browser-languagedetector": "^8.0.0",
     "lucide-react": "^0.511.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-i18next": "^15.6.1",
+    "react-router-dom": "^7.6.1",
     "zustand": "^5.0.5"
   },
   "devDependencies": {

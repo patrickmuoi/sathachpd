@@ -101,7 +101,7 @@ export default function Accounts() {
     setEditingUser(u);
     setEditName(u.full_name);
     setEditRankId(u.rank_id);
-    setEditDepartmentId((u.department_id as 'sasp' | 'bcso') || 'sasp');
+    setEditDepartmentId((u.department_id as 'sasp' | 'bcso' | 'lspd') || 'sasp');
     setEditRoles(u.roles || ['OFFICER']);
     setEditDutyNote(u.duty_note || '');
   };
@@ -162,8 +162,13 @@ export default function Accounts() {
     }
 
     if (confirm(`Đặt lại mật khẩu cho cán bộ sĩ quan ${u.full_name} (${u.callsign})?`)) {
-      setRevealedForUser(`${u.full_name} (${u.callsign})`);
-      setRevealedPassword(newPwd);
+      try {
+        await api.post(`/admin/users/${u.id}/reset-password`, { new_password: newPwd });
+        setRevealedForUser(`${u.full_name} (${u.callsign})`);
+        setRevealedPassword(newPwd);
+      } catch (err: any) {
+        alert(err.message || 'Lỗi khi đặt lại mật khẩu');
+      }
     }
   };
 

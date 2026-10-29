@@ -530,6 +530,610 @@ async function handleSupabaseRequest<T>(endpoint: string, method: string, body?:
     return (data || []) as T;
   }
 
+  // ─── ATTEMPTS & EXAM TAKING ───
+  if (endpoint === '/attempts/start' && method === 'POST') {
+    const { assignmentId } = body || {};
+    const uid = currentUser?.userId;
+
+    // Check if user already has an attempt for this assignment
+    if (uid) {
+      const { data: existingAttempts } = await supabase
+        .from('attempts')
+        .select('*')
+        .eq('assignment_id', assignmentId)
+        .eq('user_id', uid)
+        .order('started_at', { ascending: false })
+        .limit(1);
+
+      if (existingAttempts && existingAttempts.length > 0 && existingAttempts[0].status === 'in_progress') {
+        return existingAttempts[0] as T;
+      }
+    }
+
+    // Find assignment
+    const { data: assignments, error: aErr } = await supabase
+      .from('exam_assignments')
+      .select('*')
+      .eq('id', assignmentId)
+      .limit(1);
+
+    if (aErr || !assignments || assignments.length === 0) {
+      throw new ApiError('Không tìm thấy lượt phân công bài thi', 404);
+    }
+    const assign = assignments[0];
+
+    // Find exam
+    const { data: exams, error: eErr } = await supabase
+      .from('exams')
+      .select('*')
+      .eq('id', assign.exam_id)
+      .limit(1);
+
+    if (eErr || !exams || exams.length === 0) {
+      throw new ApiError('Đề thi không tồn tại', 404);
+    }
+    const exam = exams[0];
+
+    // Fetch questions
+    let { data: questions } = await supabase
+      .from('questions')
+      .select('*')
+      .eq('exam_id', exam.id)
+      .order('order_index', { ascending: true });
+
+    if (!questions || questions.length === 0) {
+      const mockExam = db.exams.find((me) => me.id === exam.id);
+      if (mockExam && mockExam.questions && mockExam.questions.length > 0) {
+        questions = mockExam.questions as any;
+      }
+    }
+
+    if (!questions || questions.length === 0) {
+      throw new ApiError('Đề thi này chưa có câu hỏi nào. Vui lòng liên hệ Quản trị viên.', 400);
+    }
+
+    // Shuffle question IDs
+    const shuffledQuestionIds = [...questions]
+      .sort(() => Math.random() - 0.5)
+      .map((q: any) => q.id);
+
+    // Shuffle options for MCQ
+    const optionOrders: Record<string, string[]> = {};
+    questions.forEach((q: any) => {
+      if (q.options && Array.isArray(q.options) && q.options.length > 0) {
+        optionOrders[q.id] = [...q.options].sort(() => Math.random() - 0.5).map((o: any) => o.id);
+      }
+    });
+
+    const now = new Date();
+    const durationMinutes = Number(exam.duration_minutes) || 60;
+    const deadline = new Date(now.getTime() + durationMinutes * 60 * 1000);
+    const examCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+
+    const attempt: Attempt = {
+      id: 'attempt-' + Date.now(),
+      assignment_id: assign.id,
+      user_id: uid || assign.user_id,
+      exam_id: exam.id,
+      exam_code: examCode,
+      question_order: shuffledQuestionIds,
+      option_orders: optionOrders,
+      started_at: now.toISOString(),
+      deadline_at: deadline.toISOString(),
+      status: 'in_progress',
+    };
+
+    const { error: insErr } = await supabase.from('attempts').insert(attempt);
+    if (insErr) throw new ApiError(insErr.message, 500);
+
+    await supabase
+      .from('exam_assignments')
+      .update({ status: 'in_progress' })
+      .eq('id', assign.id);
+
+    // Sync to local mock DB
+    db.attempts.push(attempt);
+    const localAssign = db.assignments.find((a) => a.id === assign.id);
+    if (localAssign) localAssign.status = 'in_progress';
+    db.save();
+
+    return attempt as T;
+  }
+
+  if (endpoint.startsWith('/attempts/') && method === 'GET') {
+    const attemptId = endpoint.split('/')[2];
+    const { data: attempts, error: attErr } = await supabase
+      .from('attempts')
+      .select('*')
+      .eq('id', attemptId)
+      .limit(1);
+
+    if (attErr || !attempts || attempts.length === 0) {
+      throw new ApiError('Không tìm thấy phiên làm bài', 404);
+    }
+    const attempt = attempts[0];
+
+    const { data: exams, error: exErr } = await supabase
+      .from('exams')
+      .select('*')
+      .eq('id', attempt.exam_id)
+      .limit(1);
+
+    if (exErr || !exams || exams.length === 0) {
+      throw new ApiError('Đề thi không tồn tại', 404);
+    }
+    const exam = exams[0];
+
+    let { data: rawQuestions } = await supabase
+      .from('questions')
+      .select('*')
+      .eq('exam_id', exam.id)
+      .order('order_index', { ascending: true });
+
+    if (!rawQuestions || rawQuestions.length === 0) {
+      const mockExam = db.exams.find((me) => me.id === exam.id);
+      if (mockExam && mockExam.questions) {
+        rawQuestions = mockExam.questions as any;
+      }
+    }
+
+    // Sanitize questions: tuyệt đối không gửi correct_option_id, correct_boolean, grader_note khi đang thi!
+    const sanitizedQuestions = (rawQuestions || []).map((q: any) => {
+      const sanitized = { ...q };
+      delete sanitized.correct_option_id;
+      delete sanitized.correct_boolean;
+      delete sanitized.grader_note;
+
+      if (attempt.option_orders && attempt.option_orders[q.id] && Array.isArray(q.options)) {
+        const order = attempt.option_orders[q.id];
+        sanitized.options = [...q.options].sort(
+          (a: any, b: any) => order.indexOf(a.id) - order.indexOf(b.id)
+        );
+      }
+      return sanitized;
+    });
+
+    if (Array.isArray(attempt.question_order)) {
+      sanitizedQuestions.sort(
+        (a: any, b: any) => attempt.question_order.indexOf(a.id) - attempt.question_order.indexOf(b.id)
+      );
+    }
+
+    const { data: answers } = await supabase
+      .from('answers')
+      .select('*')
+      .eq('attempt_id', attempt.id);
+
+    return {
+      attempt,
+      exam: {
+        ...exam,
+        questions: sanitizedQuestions,
+        department: db.departments.find((d) => d.id === exam.department_id),
+      },
+      answers: answers || [],
+    } as T;
+  }
+
+  if (endpoint.startsWith('/attempts/') && endpoint.endsWith('/answers') && method === 'POST') {
+    const attemptId = endpoint.split('/')[2];
+    const { questionId, selected_option_id, selected_boolean, text_answer } = body || {};
+
+    const { data: existingAns } = await supabase
+      .from('answers')
+      .select('id')
+      .eq('attempt_id', attemptId)
+      .eq('question_id', questionId)
+      .limit(1);
+
+    if (existingAns && existingAns.length > 0) {
+      await supabase
+        .from('answers')
+        .update({
+          selected_option_id: selected_option_id || null,
+          selected_boolean: selected_boolean ?? null,
+          text_answer: text_answer || null,
+        })
+        .eq('id', existingAns[0].id);
+    } else {
+      await supabase.from('answers').insert({
+        id: 'ans-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+        attempt_id: attemptId,
+        question_id: questionId,
+        selected_option_id: selected_option_id || null,
+        selected_boolean: selected_boolean ?? null,
+        text_answer: text_answer || null,
+        created_at: new Date().toISOString(),
+      });
+    }
+
+    return { success: true } as T;
+  }
+
+  if (endpoint.startsWith('/attempts/') && endpoint.endsWith('/submit') && method === 'POST') {
+    const attemptId = endpoint.split('/')[2];
+    const { submit_reason = 'manual' } = body || {};
+
+    const { data: attempts } = await supabase.from('attempts').select('*').eq('id', attemptId).limit(1);
+    if (!attempts || attempts.length === 0) throw new ApiError('Không tìm thấy bài thi', 404);
+    const attempt = attempts[0];
+
+    const { data: exams } = await supabase.from('exams').select('*').eq('id', attempt.exam_id).limit(1);
+    const exam = exams?.[0];
+    const { data: questions } = await supabase.from('questions').select('*').eq('exam_id', attempt.exam_id);
+    const { data: answers } = await supabase.from('answers').select('*').eq('attempt_id', attempt.id);
+
+    let autoScore = 0;
+    let hasSubjective = false;
+
+    for (const q of (questions || [])) {
+      const userAns = (answers || []).find((a: any) => a.question_id === q.id);
+      if (q.type === 'mcq') {
+        if (userAns && userAns.selected_option_id === q.correct_option_id) {
+          const pts = Number(q.points) || 0;
+          autoScore += pts;
+          await supabase.from('answers').update({ auto_points: pts }).eq('id', userAns.id);
+        } else if (userAns) {
+          await supabase.from('answers').update({ auto_points: 0 }).eq('id', userAns.id);
+        }
+      } else {
+        hasSubjective = true;
+      }
+    }
+
+    const isAllAuto = !hasSubjective;
+    const finalScore = isAllAuto ? Number(autoScore.toFixed(2)) : null;
+    const passed = isAllAuto ? (autoScore >= (exam?.pass_score || 5)) : null;
+    const newStatus = isAllAuto ? 'graded' : 'submitted';
+
+    const updatePayload = {
+      submitted_at: new Date().toISOString(),
+      submit_reason,
+      auto_score: Number(autoScore.toFixed(2)),
+      final_score: finalScore,
+      passed,
+      status: newStatus,
+    };
+
+    const { data: updatedAttempt, error: upErr } = await supabase
+      .from('attempts')
+      .update(updatePayload)
+      .eq('id', attemptId)
+      .select()
+      .single();
+
+    if (upErr) throw new ApiError(upErr.message, 500);
+
+    // Update exam_assignments status
+    await supabase
+      .from('exam_assignments')
+      .update({ status: newStatus })
+      .eq('id', attempt.assignment_id);
+
+    // If passed certificate exam immediately (pure MCQ)
+    if (passed && exam?.type === 'certificate' && exam?.certificate_id) {
+      await supabase.from('user_certificates').insert({
+        id: 'uc-' + Date.now(),
+        user_id: attempt.user_id,
+        certificate_id: exam.certificate_id,
+        attempt_id: attempt.id,
+        granted_at: new Date().toISOString(),
+        granted_by: currentUser?.userId || null,
+      });
+    }
+
+    return { attempt: updatedAttempt || { ...attempt, ...updatePayload } } as T;
+  }
+
+  // ─── ANTI-CHEAT LOGGING ───
+  if (endpoint === '/anticheat/event' && method === 'POST') {
+    const { attempt_id, type, reason, device, away_seconds } = body || {};
+    const eventRow = {
+      id: 'ace-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      attempt_id,
+      type: type || 'warning',
+      reason: reason || 'page_leave',
+      device: device || 'desktop',
+      away_seconds: away_seconds || 0,
+      user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
+      occurred_at: new Date().toISOString(),
+    };
+    await supabase.from('anti_cheat_events').insert(eventRow);
+    return { success: true } as T;
+  }
+
+  // ─── RESULTS & APPEALS ───
+  if (endpoint === '/results/my' && method === 'GET') {
+    const uid = currentUser?.userId;
+    const { data: attempts, error: rErr } = await supabase
+      .from('attempts')
+      .select('*, exam:exams(*)')
+      .eq('user_id', uid)
+      .neq('status', 'in_progress')
+      .order('created_at', { ascending: false });
+
+    if (rErr) throw new ApiError(rErr.message, 500);
+    return (attempts || []) as T;
+  }
+
+  if (endpoint.startsWith('/results/') && method === 'GET') {
+    const attemptId = endpoint.split('/')[2];
+    const { data: attempts } = await supabase.from('attempts').select('*').eq('id', attemptId).limit(1);
+    if (!attempts || attempts.length === 0) throw new ApiError('Không tìm thấy kết quả', 404);
+    const attempt = attempts[0];
+
+    const { data: exams } = await supabase.from('exams').select('*, questions(*)').eq('id', attempt.exam_id).limit(1);
+    const exam = exams?.[0];
+
+    const { data: answers } = await supabase.from('answers').select('*').eq('attempt_id', attempt.id);
+    const { data: appeals } = await supabase.from('appeals').select('*').eq('attempt_id', attempt.id).limit(1);
+
+    return {
+      attempt,
+      exam: exam ? {
+        ...exam,
+        department: db.departments.find((d) => d.id === exam.department_id),
+      } : undefined,
+      answers: answers || [],
+      appeal: appeals?.[0] || null,
+    } as T;
+  }
+
+  if (endpoint === '/appeals' && method === 'POST') {
+    const { attemptId, reason } = body || {};
+    const { data: existing } = await supabase
+      .from('appeals')
+      .select('id')
+      .eq('attempt_id', attemptId)
+      .eq('status', 'pending')
+      .limit(1);
+    if (existing && existing.length > 0) {
+      throw new ApiError('Bài thi này đã có yêu cầu phúc khảo đang chờ duyệt', 400);
+    }
+
+    const { data: attempts } = await supabase.from('attempts').select('*').eq('id', attemptId).limit(1);
+    if (!attempts || attempts.length === 0) throw new ApiError('Không tìm thấy bài thi', 404);
+    const attempt = attempts[0];
+
+    const appealRow = {
+      id: 'appeal-' + Date.now(),
+      attempt_id: attemptId,
+      user_id: currentUser?.userId || attempt.user_id,
+      reason,
+      status: 'pending',
+      previous_score: attempt.final_score,
+      created_at: new Date().toISOString(),
+    };
+
+    const { error: apErr } = await supabase.from('appeals').insert(appealRow);
+    if (apErr) throw new ApiError(apErr.message, 500);
+    return appealRow as T;
+  }
+
+  // ─── GRADING ROUTES ───
+  if (endpoint === '/grading/queue' && method === 'GET') {
+    const uid = currentUser?.userId;
+    const { data: attempts, error: qErr } = await supabase
+      .from('attempts')
+      .select('*, user:users(*), exam:exams(*)')
+      .in('status', ['submitted', 'in_progress'])
+      .order('created_at', { ascending: false });
+
+    if (qErr) throw new ApiError(qErr.message, 500);
+    const queue = (attempts || []).filter((a: any) => a.user_id !== uid);
+    return queue as T;
+  }
+
+  if (endpoint.startsWith('/grading/') && !endpoint.includes('/complete') && method === 'GET') {
+    const attemptId = endpoint.split('/')[2];
+    const { data: attempts } = await supabase.from('attempts').select('*').eq('id', attemptId).limit(1);
+    if (!attempts || attempts.length === 0) throw new ApiError('Không tìm thấy bài làm', 404);
+    const attempt = attempts[0];
+
+    const { data: exams } = await supabase.from('exams').select('*, questions(*)').eq('id', attempt.exam_id).limit(1);
+    const exam = exams?.[0];
+
+    const { data: answers } = await supabase.from('answers').select('*').eq('attempt_id', attempt.id);
+    const { data: users } = await supabase.from('users').select('*').eq('id', attempt.user_id).limit(1);
+
+    return {
+      attempt,
+      exam,
+      answers: answers || [],
+      officer: users?.[0] || null,
+    } as T;
+  }
+
+  if (endpoint.includes('/grading/') && endpoint.endsWith('/complete') && method === 'POST') {
+    const attemptId = endpoint.split('/')[2];
+    const { grades } = body || {};
+
+    const { data: attempts } = await supabase.from('attempts').select('*').eq('id', attemptId).limit(1);
+    if (!attempts || attempts.length === 0) throw new ApiError('Không tìm thấy bài thi', 404);
+    const attempt = attempts[0];
+
+    const { data: exams } = await supabase.from('exams').select('*, questions(*)').eq('id', attempt.exam_id).limit(1);
+    const exam = exams?.[0];
+    if (!exam) throw new ApiError('Lỗi dữ liệu bài thi', 500);
+
+    let totalScore = Number(attempt.auto_score) || 0;
+
+    for (const [qId, gradeData] of Object.entries(grades || {}) as [string, any][]) {
+      const q = exam.questions?.find((item: any) => item.id === qId);
+      if (q && q.type === 'mcq') continue;
+
+      const pts = Math.max(0, Number(gradeData.points) || 0);
+      const comment = gradeData.comment || '';
+
+      const { data: existingAns } = await supabase
+        .from('answers')
+        .select('id')
+        .eq('attempt_id', attempt.id)
+        .eq('question_id', qId)
+        .limit(1);
+
+      if (existingAns && existingAns.length > 0) {
+        await supabase
+          .from('answers')
+          .update({
+            manual_points: pts,
+            grader_comment: comment,
+            graded_by: currentUser?.userId,
+            graded_at: new Date().toISOString(),
+          })
+          .eq('id', existingAns[0].id);
+      } else {
+        await supabase.from('answers').insert({
+          id: 'ans-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+          attempt_id: attempt.id,
+          question_id: qId,
+          manual_points: pts,
+          grader_comment: comment,
+          graded_by: currentUser?.userId,
+          graded_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+        });
+      }
+      totalScore += pts;
+    }
+
+    const finalScore = Number(totalScore.toFixed(2));
+    const passed = finalScore >= exam.pass_score;
+
+    await supabase
+      .from('attempts')
+      .update({
+        final_score: finalScore,
+        passed,
+        status: 'graded',
+      })
+      .eq('id', attemptId);
+
+    await supabase
+      .from('exam_assignments')
+      .update({ status: 'graded' })
+      .eq('id', attempt.assignment_id);
+
+    if (passed && exam.type === 'certificate' && exam.certificate_id) {
+      await supabase.from('user_certificates').insert({
+        id: 'uc-' + Date.now(),
+        user_id: attempt.user_id,
+        certificate_id: exam.certificate_id,
+        attempt_id: attempt.id,
+        granted_at: new Date().toISOString(),
+        granted_by: currentUser?.userId || null,
+      });
+    }
+
+    return { success: true } as T;
+  }
+
+  // ─── CERTIFICATES ───
+  if (endpoint === '/certificates/my' && method === 'GET') {
+    const uid = currentUser?.userId;
+    const { data: requests } = await supabase
+      .from('certificate_requests')
+      .select('*, certificate:certificates(*)')
+      .eq('user_id', uid)
+      .order('created_at', { ascending: false });
+
+    const { data: granted } = await supabase
+      .from('user_certificates')
+      .select('*, certificate:certificates(*)')
+      .eq('user_id', uid)
+      .is('revoked_at', null)
+      .order('granted_at', { ascending: false });
+
+    return { requests: requests || [], granted: granted || [] } as T;
+  }
+
+  if (endpoint === '/certificates/request' && method === 'POST') {
+    const { certificateId, note } = body || {};
+    const uid = currentUser?.userId;
+    const reqRow = {
+      id: 'req-' + Date.now(),
+      user_id: uid,
+      certificate_id: certificateId,
+      status: 'pending',
+      note: note || '',
+      created_at: new Date().toISOString(),
+    };
+    const { error } = await supabase.from('certificate_requests').insert(reqRow);
+    if (error) throw new ApiError(error.message, 500);
+    return reqRow as T;
+  }
+
+  if (endpoint === '/admin/cert-requests' && method === 'GET') {
+    const { data, error } = await supabase
+      .from('certificate_requests')
+      .select('*, user:users(*), certificate:certificates(*)')
+      .order('created_at', { ascending: false });
+    if (error) throw new ApiError(error.message, 500);
+    return (data || []) as T;
+  }
+
+  if (endpoint.startsWith('/admin/cert-requests/') && method === 'PATCH') {
+    const reqId = endpoint.split('/')[3];
+    const { status, note } = body || {};
+    const { error } = await supabase
+      .from('certificate_requests')
+      .update({
+        status,
+        note,
+        decided_by: currentUser?.userId,
+        decided_at: new Date().toISOString(),
+      })
+      .eq('id', reqId);
+    if (error) throw new ApiError(error.message, 500);
+    return body as T;
+  }
+
+  if (endpoint.includes('/audit') && method === 'GET') {
+    const attemptId = endpoint.split('/')[3];
+    const { data, error } = await supabase
+      .from('anti_cheat_events')
+      .select('*')
+      .eq('attempt_id', attemptId)
+      .order('occurred_at', { ascending: true });
+    if (error) throw new ApiError(error.message, 500);
+    return (data || []) as T;
+  }
+
+  if (endpoint === '/appeals' && method === 'GET') {
+    const { data, error } = await supabase
+      .from('appeals')
+      .select('*, user:users(*), attempt:attempts(*)')
+      .order('created_at', { ascending: false });
+    if (error) throw new ApiError(error.message, 500);
+    return (data || []) as T;
+  }
+
+  if (endpoint.startsWith('/appeals/') && method === 'PATCH') {
+    const appealId = endpoint.split('/')[2];
+    const { status, decided_note } = body || {};
+
+    const { error } = await supabase
+      .from('appeals')
+      .update({
+        status,
+        decided_note,
+        decided_by: currentUser?.userId,
+        decided_at: new Date().toISOString(),
+      })
+      .eq('id', appealId);
+
+    if (error) throw new ApiError(error.message, 500);
+
+    if (status === 'approved') {
+      const { data: appeals } = await supabase.from('appeals').select('attempt_id').eq('id', appealId).limit(1);
+      if (appeals && appeals.length > 0) {
+        await supabase.from('attempts').update({ status: 'submitted' }).eq('id', appeals[0].attempt_id);
+      }
+    }
+
+    return body as T;
+  }
+
   return undefined;
 }
 

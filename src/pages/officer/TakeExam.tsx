@@ -26,6 +26,7 @@ export default function TakeExam() {
 
   // State
   const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   const [exam, setExam] = useState<Exam | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -59,12 +60,14 @@ export default function TakeExam() {
     if (!assignmentId) return;
     try {
       setLoading(true);
+      setErrorMsg(null);
       // Check if attempt already exists or start new
       const res = await api.post<Attempt>('/attempts/start', { assignmentId });
       setAttempt(res);
       await loadAttemptDetails(res.id);
     } catch (err: any) {
       console.error('Failed to init attempt', err);
+      setErrorMsg(err.message || 'Không thể khởi tạo phiên làm bài. Vui lòng thử lại hoặc liên hệ Quản trị viên.');
     } finally {
       setLoading(false);
     }
@@ -80,7 +83,12 @@ export default function TakeExam() {
 
       setAttempt(data.attempt);
       setExam(data.exam);
-      setQuestions(data.exam.questions || []);
+      const qList = data.exam.questions || [];
+      setQuestions(qList);
+
+      if (qList.length === 0) {
+        setErrorMsg('Đề thi này hiện tại chưa có câu hỏi nào được lưu trên hệ thống.');
+      }
 
       // Rehydrate answers map
       const ansMap: Record<string, Partial<Answer>> = {};
@@ -99,8 +107,9 @@ export default function TakeExam() {
       if (data.attempt.status !== 'in_progress') {
         navigate(`/officer/results/${data.attempt.id}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error loading attempt detail', err);
+      setErrorMsg(err.message || 'Lỗi tải chi tiết bài thi');
     }
   };
 
@@ -306,6 +315,38 @@ export default function TakeExam() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[var(--color-bg)]">
         <LoadingSpinner size="lg" />
+      </div>
+    );
+  }
+
+  if (errorMsg || !attempt) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[var(--color-bg)] p-4">
+        <div className="max-w-md w-full rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-xl text-center space-y-4">
+          <div className="h-16 w-16 mx-auto rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center border border-amber-500/20">
+            <AlertTriangle className="h-8 w-8" />
+          </div>
+          <h2 className="text-lg font-black text-[var(--color-text)]">
+            Không thể vào phòng thi
+          </h2>
+          <p className="text-xs sm:text-sm text-[var(--color-text-secondary)] leading-relaxed">
+            {errorMsg || 'Không tìm thấy thông tin lượt làm bài hoặc đề thi chưa được cấu hình câu hỏi.'}
+          </p>
+          <div className="pt-2 flex flex-col sm:flex-row gap-2 justify-center">
+            <button
+              onClick={() => initExamSession()}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold bg-[#1a3a6b] text-[#ffd700] hover:bg-[#152e55] shadow"
+            >
+              Thử kết nối lại
+            </button>
+            <button
+              onClick={() => navigate('/officer/exams')}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold border border-[var(--color-border)] hover:bg-[var(--color-surface-hover)] text-[var(--color-text)]"
+            >
+              ← Về danh sách bài thi
+            </button>
+          </div>
+        </div>
       </div>
     );
   }

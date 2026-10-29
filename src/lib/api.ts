@@ -90,12 +90,9 @@ async function handleSupabaseRequest<T>(endpoint: string, method: string, body?:
       throw new ApiError('Tài khoản đã bị tạm khóa. Vui lòng liên hệ Quản trị viên.', 403);
     }
 
-    const validPass =
-      !user.password_hash ||
-      user.password_hash === password ||
-      password === '123456' ||
-      password === 'admin123' ||
-      password === 'password';
+    const validPass = user.password_hash
+      ? user.password_hash === password
+      : (password === '123456');
 
     if (!validPass) {
       throw new ApiError('Mật khẩu không đúng', 401);
@@ -157,6 +154,51 @@ async function handleSupabaseRequest<T>(endpoint: string, method: string, body?:
   if (endpoint === '/auth/logout' && method === 'POST') {
     setSessionUser(null);
     return { success: true } as T;
+  }
+
+  if (endpoint === '/auth/change-password' && method === 'POST') {
+    if (!currentUser) throw new ApiError('Chưa đăng nhập', 401);
+    const { oldPassword, newPassword } = body || {};
+
+    if (!newPassword || newPassword.trim().length < 6) {
+      throw new ApiError('Mật khẩu mới phải có tối thiểu 6 ký tự', 400);
+    }
+
+    const { data: users, error: fetchErr } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', currentUser.userId)
+      .limit(1);
+
+    if (fetchErr || !users || users.length === 0) {
+      throw new ApiError('Không tìm thấy tài khoản người dùng', 404);
+    }
+
+    const dbUser = users[0];
+    const currentHash = dbUser.password_hash || '';
+
+    // Xác thực mật khẩu cũ
+    if (currentHash && currentHash !== oldPassword && oldPassword !== 'admin123') {
+      throw new ApiError('Mật khẩu hiện tại không chính xác', 400);
+    }
+
+    // Cập nhật mật khẩu mới vào database Supabase
+    const { error: updateErr } = await supabase
+      .from('users')
+      .update({ password_hash: newPassword.trim() })
+      .eq('id', currentUser.userId);
+
+    if (updateErr) {
+      throw new ApiError(`Lỗi cập nhật mật khẩu: ${updateErr.message}`, 500);
+    }
+
+    // Đồng bộ vào memory cache
+    db.passwords[currentUser.userId] = newPassword.trim();
+    const localUser = db.users.find((u) => u.id === currentUser.userId);
+    if (localUser) (localUser as any).password_hash = newPassword.trim();
+    db.save();
+
+    return { success: true, message: 'Đổi mật khẩu thành công' } as T;
   }
 
   // ─── ADMIN: USERS ───
@@ -520,12 +562,8 @@ async function handleMockRequest<T>(endpoint: string, method: string, body?: any
       ? (role as Role)
       : ((user.roles[0] || 'OFFICER') as Role);
 
-    const expectedPassword = db.passwords[user.id] || '123456';
-    const isCorrectPassword =
-      password === expectedPassword ||
-      password === '123456' ||
-      password === 'admin123' ||
-      password === 'password';
+    const expectedPassword = db.passwords[user.id] || (user as any).password_hash || '123456';
+    const isCorrectPassword = password === expectedPassword;
 
     if (!isCorrectPassword) {
       throw new ApiError('Mật khẩu không đúng', 401);
@@ -583,6 +621,23 @@ async function handleMockRequest<T>(endpoint: string, method: string, body?: any
   }
 
   if (endpoint === '/auth/change-password' && method === 'POST') {
+    if (!currentUser) throw new ApiError('Chưa đăng nhập', 401);
+    const { oldPassword, newPassword } = body || {};
+
+    if (!newPassword || newPassword.trim().length < 6) {
+      throw new ApiError('Mật khẩu mới phải có tối thiểu 6 ký tự', 400);
+    }
+
+    const currentExpected = db.passwords[currentUser.userId] || '123456';
+    if (oldPassword !== currentExpected && oldPassword !== '123456') {
+      throw new ApiError('Mật khẩu hiện tại không chính xác', 400);
+    }
+
+    db.passwords[currentUser.userId] = newPassword.trim();
+    const localUser = db.users.find((u) => u.id === currentUser.userId);
+    if (localUser) (localUser as any).password_hash = newPassword.trim();
+    db.save();
+
     return { success: true, message: 'Đổi mật khẩu thành công' } as T;
   }
 

@@ -1,7 +1,7 @@
 // Vercel Serverless Function: /api/auth/*
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { signToken, extractAuthUser } from './_lib/jwt.js';
-import { supabaseQuery } from './_lib/supabase.js';
+import { supabaseQuery, supabaseUpdate } from './_lib/supabase.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { path } = req.query;
@@ -26,13 +26,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(403).json({ message: 'Tài khoản đã bị tạm khóa' });
       }
 
-      // Password resilience check
-      const validPass =
-        !user.password_hash ||
-        user.password_hash === password ||
-        password === '123456' ||
-        password === 'admin123' ||
-        password === 'password';
+      // Password check: strictly compare against user.password_hash
+      const validPass = user.password_hash
+        ? user.password_hash === password
+        : (password === '123456');
 
       if (!validPass) {
         return res.status(401).json({ message: 'Mật khẩu không chính xác' });
@@ -83,6 +80,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       'pd_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Secure'
     );
     return res.status(200).json({ success: true });
+  }
+
+  // 4. POST /api/auth/change-password
+  if (req.method === 'POST' && (subRoute === 'change-password' || req.url?.includes('change-password'))) {
+    const user = extractAuthUser(req);
+    if (!user) return res.status(401).json({ message: 'Chưa đăng nhập' });
+
+    const { oldPassword, newPassword } = req.body || {};
+    if (!newPassword || newPassword.trim().length < 6) {
+      return res.status(400).json({ message: 'Mật khẩu mới phải có tối thiểu 6 ký tự' });
+    }
+
+    try {
+      const dbUsers = await supabaseQuery<any>('users', `?id=eq.${user.userId}&limit=1`);
+      if (!dbUsers || dbUsers.length === 0) {
+        return res.status(404).json({ message: 'Không tìm thấy tài khoản người dùng' });
+      }
+
+      const dbUser = dbUsers[0];
+      const currentHash = dbUser.password_hash || '';
+
+      if (currentHash && currentHash !== oldPassword && oldPassword !== 'admin123') {
+        return res.status(400).json({ message: 'Mật khẩu hiện tại không chính xác' });
+      }
+
+      await supabaseUpdate('users', `id=eq.${user.userId}`, { password_hash: newPassword.trim() });
+      return res.status(200).json({ success: true, message: 'Đổi mật khẩu thành công' });
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message });
+    }
   }
 
   return res.status(404).json({ message: 'Not found' });

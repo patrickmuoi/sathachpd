@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Award, CheckCircle2, Clock, XCircle, Send, ShieldCheck, AlertCircle } from 'lucide-react';
+import { Award, CheckCircle2, Clock, XCircle, Send, ShieldCheck, AlertCircle, RefreshCw } from 'lucide-react';
 import { api } from '../../lib/api';
+import { supabase } from '../../lib/supabase';
 import type { Certificate, CertificateRequest, UserCertificate } from '../../lib/types';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import Modal from '../../components/Modal';
@@ -19,12 +20,35 @@ export default function Certificates() {
   const [registering, setRegistering] = useState(false);
 
   useEffect(() => {
-    loadData();
+    loadData(true);
+
+    const channel = supabase
+      ?.channel('officer_certs_live')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'certificate_requests' },
+        () => loadData(false)
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'user_certificates' },
+        () => loadData(false)
+      )
+      .subscribe();
+
+    const timer = setInterval(() => {
+      loadData(false);
+    }, 4000);
+
+    return () => {
+      if (channel) supabase?.removeChannel(channel);
+      clearInterval(timer);
+    };
   }, []);
 
-  const loadData = async () => {
+  const loadData = async (isInitial = false) => {
     try {
-      setLoading(true);
+      if (isInitial) setLoading(true);
       const [allCerts, myData] = await Promise.all([
         api.get<Certificate[]>('/certificates'),
         api.get<{ requests: CertificateRequest[]; granted: UserCertificate[] }>('/certificates/my'),
@@ -35,7 +59,7 @@ export default function Certificates() {
     } catch (err) {
       console.error('Failed to load certificates', err);
     } finally {
-      setLoading(false);
+      if (isInitial) setLoading(false);
     }
   };
 
@@ -51,7 +75,7 @@ export default function Certificates() {
       });
       setSelectedCert(null);
       setNote('');
-      await loadData();
+      await loadData(false);
     } catch (err: any) {
       alert(err.message || 'Lỗi đăng ký');
     } finally {

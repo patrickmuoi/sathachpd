@@ -1110,7 +1110,7 @@ async function handleSupabaseRequest<T>(endpoint: string, method: string, body?:
   if (endpoint === '/admin/cert-requests' && method === 'GET') {
     const { data, error } = await supabase
       .from('certificate_requests')
-      .select('*, user:users(*), certificate:certificates(*)')
+      .select('*, user:users!certificate_requests_user_id_fkey(*), certificate:certificates(*)')
       .order('created_at', { ascending: false });
     if (error) throw new ApiError(error.message, 500);
     return (data || []) as T;
@@ -1129,6 +1129,46 @@ async function handleSupabaseRequest<T>(endpoint: string, method: string, body?:
       })
       .eq('id', reqId);
     if (error) throw new ApiError(error.message, 500);
+
+    // If approved, automatically create an assignment for the officer if an exam exists for this certificate
+    if (status === 'approved') {
+      const { data: reqData } = await supabase
+        .from('certificate_requests')
+        .select('*')
+        .eq('id', reqId)
+        .limit(1);
+
+      if (reqData && reqData.length > 0) {
+        const reqItem = reqData[0];
+        const { data: certExams } = await supabase
+          .from('exams')
+          .select('id')
+          .eq('certificate_id', reqItem.certificate_id)
+          .limit(1);
+
+        if (certExams && certExams.length > 0) {
+          const examId = certExams[0].id;
+          const { data: existingAssign } = await supabase
+            .from('exam_assignments')
+            .select('id')
+            .eq('exam_id', examId)
+            .eq('user_id', reqItem.user_id)
+            .limit(1);
+
+          if (!existingAssign || existingAssign.length === 0) {
+            await supabase.from('exam_assignments').insert({
+              id: 'assign-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+              exam_id: examId,
+              user_id: reqItem.user_id,
+              assigned_by: currentUser?.userId || 'user-admin',
+              assigned_at: new Date().toISOString(),
+              status: 'assigned',
+            });
+          }
+        }
+      }
+    }
+
     return body as T;
   }
 
@@ -1146,7 +1186,7 @@ async function handleSupabaseRequest<T>(endpoint: string, method: string, body?:
   if (endpoint === '/appeals' && method === 'GET') {
     const { data, error } = await supabase
       .from('appeals')
-      .select('*, user:users(*), attempt:attempts(*)')
+      .select('*, user:users!appeals_user_id_fkey(*), attempt:attempts(*)')
       .order('created_at', { ascending: false });
     if (error) throw new ApiError(error.message, 500);
     return (data || []) as T;

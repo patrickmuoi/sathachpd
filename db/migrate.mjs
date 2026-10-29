@@ -21,7 +21,7 @@ if (!connectionString || connectionString.includes('[YOUR-PASSWORD]')) {
 }
 
 console.log('🚀 Đang kết nối tới Supabase qua connection string...');
-const sql = postgres(connectionString);
+const sql = postgres(connectionString, { ssl: 'require' });
 
 try {
   const migrationSql = fs.readFileSync(path.resolve('db/migration.sql'), 'utf8');

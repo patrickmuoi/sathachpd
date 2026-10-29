@@ -1,7 +1,7 @@
 // Vercel Serverless Function: /api/auth/*
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { signToken, extractAuthUser } from './_lib/jwt';
-import { supabaseQuery } from './_lib/supabase';
+import { signToken, extractAuthUser } from './_lib/jwt.js';
+import { supabaseQuery } from './_lib/supabase.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { path } = req.query;
@@ -87,4 +87,3 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   return res.status(404).json({ message: 'Not found' });
 }
-

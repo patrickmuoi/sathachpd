@@ -39,6 +39,13 @@ export interface ChatTurn {
 }
 
 export async function sendDutyOfficerChat(history: ChatTurn[]): Promise<string> {
+  if (!GEMINI_API_KEY) {
+    return (
+      'Báo cáo Sĩ quan, trợ lý AI hiện chưa được cấu hình khóa API (VITE_GEMINI_API_KEY). ' +
+      'Sĩ quan có thể tham khảo mục "Câu hỏi thường gặp" ở phía trên hoặc liên hệ trực tiếp với Cán bộ Quản trị phòng thi qua số nội bộ để được giải quyết khẩn cấp.'
+    );
+  }
+
   const contents = history.map((turn) => ({
     role: turn.role === 'model' ? 'model' : 'user',
     parts: [{ text: turn.text }],

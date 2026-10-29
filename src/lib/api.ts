@@ -346,6 +346,31 @@ async function handleSupabaseRequest<T>(endpoint: string, method: string, body?:
     return { success: true } as T;
   }
 
+  // ─── ADMIN: STATS ───
+  if (endpoint === '/admin/stats' && method === 'GET') {
+    const [
+      { count: totalOfficers },
+      { count: activeExams },
+      { count: pendingGrading },
+      { count: pendingAppeals },
+      { count: pendingCertRequests },
+    ] = await Promise.all([
+      supabase.from('users').select('*', { count: 'exact', head: true }),
+      supabase.from('exams').select('*', { count: 'exact', head: true }).eq('status', 'published'),
+      supabase.from('attempts').select('*', { count: 'exact', head: true }).eq('status', 'submitted'),
+      supabase.from('appeals').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+      supabase.from('certificate_requests').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+    ]);
+
+    return {
+      totalOfficers: totalOfficers || 0,
+      activeExams: activeExams || 0,
+      pendingGrading: pendingGrading || 0,
+      pendingAppeals: pendingAppeals || 0,
+      pendingCertRequests: pendingCertRequests || 0,
+    } as T;
+  }
+
   // ─── ADMIN: EXAMS ───
   if (endpoint === '/admin/exams' && method === 'GET') {
     const { data: rawExams, error } = await supabase
@@ -375,20 +400,39 @@ async function handleSupabaseRequest<T>(endpoint: string, method: string, body?:
   }
 
   if (endpoint === '/admin/exams' && method === 'POST') {
+    const examId = 'exam-' + Date.now();
+    const { questions, id, department, target_rank, certificate, ...rest } = body || {};
+
     const newExam: Exam = {
-      id: 'exam-' + Date.now(),
-      department_id: body.department_id || 'all',
-      ...body,
+      ...rest,
+      id: examId,
+      department_id: rest.department_id || 'all',
+      target_rank_id: rest.target_rank_id || null,
+      certificate_id: rest.certificate_id || null,
       created_by: currentUser?.userId || 'user-admin',
       created_at: new Date().toISOString(),
     };
-    const { questions, ...examRow } = newExam as any;
+
+    const examRow = {
+      id: newExam.id,
+      title: newExam.title,
+      type: newExam.type,
+      department_id: newExam.department_id,
+      target_rank_id: newExam.target_rank_id,
+      certificate_id: newExam.certificate_id,
+      duration_minutes: Number(newExam.duration_minutes) || 60,
+      pass_score: Number(newExam.pass_score) || 5,
+      status: newExam.status || 'published',
+      created_by: newExam.created_by,
+      created_at: newExam.created_at,
+    };
+
     const { error } = await supabase.from('exams').insert(examRow);
     if (error) throw new ApiError(error.message, 500);
 
     if (questions && questions.length > 0) {
       const qRows = questions.map((q: any, idx: number) => ({
-        id: q.id || 'q-' + Date.now() + '-' + idx,
+        id: 'q-' + Date.now() + '-' + idx,
         exam_id: newExam.id,
         order_index: idx + 1,
         type: q.type,

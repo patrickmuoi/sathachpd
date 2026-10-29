@@ -308,7 +308,7 @@ async function handleSupabaseRequest<T>(endpoint: string, method: string, body?:
   if (endpoint === '/admin/exams' && method === 'GET') {
     const { data, error } = await supabase
       .from('exams')
-      .select('*, department:departments(*), target_rank:ranks(*), certificate:certificates(*)')
+      .select('*, department:departments(*), target_rank:ranks(*), certificate:certificates(*), questions(*)')
       .order('created_at', { ascending: false });
     if (error) throw new ApiError(error.message, 500);
     return (data || []) as T;
@@ -328,11 +328,20 @@ async function handleSupabaseRequest<T>(endpoint: string, method: string, body?:
 
     if (questions && questions.length > 0) {
       const qRows = questions.map((q: any, idx: number) => ({
-        ...q,
+        id: q.id || 'q-' + Date.now() + '-' + idx,
         exam_id: newExam.id,
         order_index: idx + 1,
+        type: q.type,
+        text: q.text,
+        points: q.points,
+        options: q.options || null,
+        correct_option_id: q.correct_option_id || null,
+        correct_boolean: q.correct_boolean ?? null,
+        grader_note: q.grader_note || null,
+        min_words: q.min_words || 20,
       }));
-      await supabase.from('questions').insert(qRows);
+      const { error: qErr } = await supabase.from('questions').insert(qRows);
+      if (qErr) console.error('Error inserting questions to supabase:', qErr);
     }
 
     db.exams.push(newExam);
@@ -844,9 +853,13 @@ async function handleMockRequest<T>(endpoint: string, method: string, body?: any
     const exam = db.exams.find((e) => e.id === attempt.exam_id);
     if (!exam || !exam.questions) throw new ApiError('Lỗi dữ liệu bài thi', 500);
 
-    let totalScore = attempt.auto_score || 0;
+    let totalScore = Number(attempt.auto_score) || 0;
 
     Object.entries(grades || {}).forEach(([qId, gradeData]: [string, any]) => {
+      // Câu trắc nghiệm đã tự tính điểm theo đáp án đúng khi thí sinh tích, bỏ qua không ghi đè
+      const q = exam.questions?.find((item) => item.id === qId);
+      if (q && q.type === 'mcq') return;
+
       let ans = db.answers.find((a) => a.attempt_id === attempt.id && a.question_id === qId);
       if (!ans) {
         ans = {
@@ -856,15 +869,15 @@ async function handleMockRequest<T>(endpoint: string, method: string, body?: any
         };
         db.answers.push(ans);
       }
-      ans.manual_points = Number(gradeData.points) || 0;
+      ans.manual_points = Math.max(0, Number(gradeData.points) || 0);
       ans.grader_comment = gradeData.comment || '';
       ans.graded_by = currentUser?.userId;
       ans.graded_at = new Date().toISOString();
       totalScore += ans.manual_points;
     });
 
-    attempt.final_score = totalScore;
-    attempt.passed = totalScore >= exam.pass_score;
+    attempt.final_score = Number(totalScore.toFixed(2));
+    attempt.passed = attempt.final_score >= exam.pass_score;
     attempt.status = 'graded';
 
     const assign = db.assignments.find((a) => a.id === attempt.assignment_id);

@@ -99,15 +99,61 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { submit_reason = 'manual' } = req.body || {};
 
     try {
+      const attempts = await supabaseQuery<any>('attempts', `?id=eq.${attemptId}&limit=1`);
+      if (attempts.length === 0) return res.status(404).json({ message: 'Không tìm thấy lượt thi' });
+      const attempt = attempts[0];
+
+      const exams = await supabaseQuery<any>('exams', `?id=eq.${attempt.exam_id}&limit=1`);
+      const exam = exams[0];
+
+      const questions = await supabaseQuery<any>('questions', `?exam_id=eq.${exam.id}`);
+      const answers = await supabaseQuery<any>('answers', `?attempt_id=eq.${attempt.id}`);
+
+      let autoScore = 0;
+      let hasEssay = false;
+
+      for (const q of questions) {
+        const userAns = answers.find((a: any) => a.question_id === q.id);
+        if (q.type === 'mcq') {
+          if (userAns && userAns.selected_option_id === q.correct_option_id) {
+            const pts = Number(q.points) || 0;
+            autoScore += pts;
+            await supabaseUpdate('answers', `id=eq.${userAns.id}`, { auto_points: pts }).catch(() => {});
+          } else if (userAns) {
+            await supabaseUpdate('answers', `id=eq.${userAns.id}`, { auto_points: 0 }).catch(() => {});
+          }
+        } else {
+          hasEssay = true;
+        }
+      }
+
+      const updateData: any = {
+        submitted_at: new Date().toISOString(),
+        submit_reason,
+        auto_score: autoScore,
+      };
+
+      if (!hasEssay) {
+        updateData.final_score = autoScore;
+        updateData.passed = autoScore >= exam.pass_score;
+        updateData.status = 'graded';
+      } else {
+        updateData.status = 'submitted';
+      }
+
       const updated = await supabaseUpdate<any>(
         'attempts',
         `id=eq.${attemptId}`,
-        {
-          submitted_at: new Date().toISOString(),
-          submit_reason,
-          status: 'submitted',
-        }
+        updateData
       );
+
+      // Cập nhật trạng thái phân công
+      await supabaseUpdate(
+        'exam_assignments',
+        `id=eq.${attempt.assignment_id}`,
+        { status: updateData.status }
+      ).catch(() => {});
+
       return res.status(200).json({ attempt: updated });
     } catch (err: any) {
       return res.status(500).json({ message: err.message });

@@ -11,6 +11,8 @@ import {
   HelpCircle,
   Send,
   MessageSquare,
+  Cpu,
+  PenTool,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import type { Attempt, Exam, Answer, Appeal } from '../../lib/types';
@@ -84,9 +86,11 @@ export default function ResultDetail() {
   }
 
   const isGraded = attempt.status === 'graded';
+  const autoScore = attempt.auto_score || 0;
+  const manualScore = isGraded ? Math.max(0, (attempt.final_score || 0) - autoScore) : 0;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-5xl mx-auto pb-16">
       {/* Back button */}
       <button
         onClick={() => navigate('/officer/results')}
@@ -110,43 +114,48 @@ export default function ResultDetail() {
           <h1 className="text-xl sm:text-2xl font-black text-[var(--color-text)]">
             {exam.title}
           </h1>
-          <p className="text-xs text-[var(--color-text-secondary)] mt-1">
-            Thời lượng: {exam.duration_minutes} phút • Điểm chuẩn: {exam.pass_score}đ
-          </p>
+          <div className="flex items-center gap-3 text-xs text-[var(--color-text-secondary)] mt-2">
+            <span>Thời lượng: {exam.duration_minutes} phút</span>
+            <span>•</span>
+            <span>Điểm chuẩn đạt: <strong>{exam.pass_score}đ</strong></span>
+          </div>
         </div>
 
         {/* Score Stamp */}
-        <div className="flex items-center gap-4 bg-[var(--color-bg)] p-4 rounded-xl border border-[var(--color-border)]">
+        <div className="flex items-center gap-4 bg-[var(--color-bg)] p-4 rounded-xl border border-[var(--color-border)] shrink-0">
           {isGraded ? (
             <>
               <div>
-                <span className="text-xs text-[var(--color-text-secondary)] block">Tổng điểm</span>
+                <span className="text-xs text-[var(--color-text-secondary)] block">Tổng điểm chính thức</span>
                 <span className="text-3xl font-black text-[var(--color-text)]">
                   {attempt.final_score}
                   <span className="text-xs text-[var(--color-text-secondary)] font-normal"> / 10đ</span>
                 </span>
+                <span className="text-[11px] text-[var(--color-text-secondary)] block">
+                  (TN: {autoScore}đ + TL: {manualScore.toFixed(1)}đ)
+                </span>
               </div>
               <div>
                 {attempt.passed ? (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-sm bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
-                    <CheckCircle2 className="h-4 w-4" />
-                    {t('grading.passed')}
+                  <span className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl font-black text-sm bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 shadow-sm">
+                    <CheckCircle2 className="h-5 w-5" />
+                    <span>{t('grading.passed')}</span>
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-sm bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/30">
-                    <XCircle className="h-4 w-4" />
-                    {t('grading.failed')}
+                  <span className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl font-black text-sm bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/30 shadow-sm">
+                    <XCircle className="h-5 w-5" />
+                    <span>{t('grading.failed')}</span>
                   </span>
                 )}
               </div>
             </>
           ) : (
-            <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
-              <Clock className="h-5 w-5 animate-spin" />
+            <div className="flex items-center gap-3 text-amber-600 dark:text-amber-400">
+              <Clock className="h-6 w-6 animate-spin text-amber-500" />
               <div>
-                <p className="text-xs font-bold">Chờ hoàn tất chấm</p>
-                <p className="text-[11px] text-[var(--color-text-secondary)]">
-                  Điểm trắc nghiệm: {attempt.auto_score || 0}đ
+                <p className="text-xs font-black uppercase">Chờ Cán bộ chấm tự luận</p>
+                <p className="text-[11px] text-[var(--color-text-secondary)] mt-0.5">
+                  Điểm trắc nghiệm (tự chấm): <strong className="text-emerald-600 font-bold">{autoScore}đ</strong>
                 </p>
               </div>
             </div>
@@ -207,12 +216,37 @@ export default function ResultDetail() {
               className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-sm space-y-4"
             >
               <div className="flex items-center justify-between border-b border-[var(--color-border)] pb-3">
-                <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-[#1a3a6b] text-[#ffd700]">
-                  Câu {idx + 1}
-                </span>
-                <span className="text-xs font-bold text-[var(--color-text)]">
-                  Điểm đạt: {pointsEarned !== undefined ? `${pointsEarned} / ` : ''}
-                  {q.points}đ
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-[#1a3a6b] text-[#ffd700]">
+                    Câu {idx + 1}
+                  </span>
+                  {isMcq ? (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                      <Cpu className="h-3 w-3" /> Trắc nghiệm (Tự chấm)
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-600 dark:text-blue-400">
+                      <PenTool className="h-3 w-3" /> Tự luận (Cán bộ cho điểm)
+                    </span>
+                  )}
+                </div>
+
+                <span className="text-xs font-black text-[var(--color-text)]">
+                  {isMcq ? (
+                    pointsEarned !== undefined ? (
+                      <span className={pointsEarned > 0 ? 'text-emerald-600' : 'text-red-500'}>
+                        {pointsEarned} / {q.points}đ
+                      </span>
+                    ) : (
+                      `${q.points}đ`
+                    )
+                  ) : isGraded ? (
+                    <span className="text-blue-600">
+                      {pointsEarned ?? 0} / {q.points}đ
+                    </span>
+                  ) : (
+                    <span className="text-amber-500 italic font-semibold">Chờ Cán bộ cho điểm (Tối đa {q.points}đ)</span>
+                  )}
                 </span>
               </div>
 
@@ -223,13 +257,13 @@ export default function ResultDetail() {
 
               {/* Officer Answer */}
               <div className="rounded-xl bg-[var(--color-bg)] p-3.5 border border-[var(--color-border)] text-xs space-y-1">
-                <span className="text-[11px] font-bold text-[var(--color-text-secondary)] block">
+                <span className="text-[11px] font-bold text-[var(--color-text-secondary)] block uppercase tracking-wider">
                   Câu trả lời của đồng chí:
                 </span>
                 {isMcq ? (
-                  <p className="text-[var(--color-text)] font-medium">
+                  <p className="text-[var(--color-text)] font-semibold text-sm">
                     {q.options?.find((o) => o.id === userAns?.selected_option_id)?.text || (
-                      <em className="text-[var(--color-text-secondary)]">Chưa chọn đáp án</em>
+                      <em className="text-red-500">Chưa chọn đáp án</em>
                     )}
                   </p>
                 ) : q.type === 'true_false_explain' ? (
@@ -242,8 +276,8 @@ export default function ResultDetail() {
                     </p>
                   </div>
                 ) : (
-                  <p className="text-[var(--color-text)] whitespace-pre-wrap">
-                    {userAns?.text_answer || 'Chưa trả lời'}
+                  <p className="text-[var(--color-text)] whitespace-pre-wrap leading-relaxed text-sm">
+                    {userAns?.text_answer || <em className="text-red-500">Chưa trả lời</em>}
                   </p>
                 )}
               </div>
@@ -251,15 +285,15 @@ export default function ResultDetail() {
               {/* Show Model Answers & Grader Note only after graded */}
               {isGraded && (
                 <div className="space-y-2 pt-2 border-t border-[var(--color-border)]">
-                  {/* Correct answer display */}
+                  {/* Correct answer display for MCQ */}
                   {isMcq && (
-                    <div className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-                      ✓ Đáp án chuẩn:{' '}
+                    <div className="text-xs text-emerald-600 dark:text-emerald-400 font-bold">
+                      ✓ Đáp án chuẩn của đề:{' '}
                       {q.options?.find((o) => o.id === q.correct_option_id)?.text}
                     </div>
                   )}
 
-                  {/* Grader Comment */}
+                  {/* Grader Comment for Essay */}
                   {userAns?.grader_comment && (
                     <div className="rounded-xl bg-blue-500/10 p-3 border border-blue-500/20 text-xs">
                       <span className="font-bold text-blue-700 dark:text-blue-300 block mb-0.5">
@@ -318,4 +352,3 @@ export default function ResultDetail() {
     </div>
   );
 }
-

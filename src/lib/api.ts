@@ -306,12 +306,30 @@ async function handleSupabaseRequest<T>(endpoint: string, method: string, body?:
 
   // ─── ADMIN: EXAMS ───
   if (endpoint === '/admin/exams' && method === 'GET') {
-    const { data, error } = await supabase
+    const { data: rawExams, error } = await supabase
       .from('exams')
-      .select('*, department:departments(*), target_rank:ranks(*), certificate:certificates(*), questions(*)')
+      .select('*, target_rank:ranks(*), certificate:certificates(*), questions(*)')
       .order('created_at', { ascending: false });
     if (error) throw new ApiError(error.message, 500);
-    return (data || []) as T;
+
+    const exams = (rawExams || []).map((e: any) => {
+      let questions = e.questions || [];
+      if (questions.length === 0) {
+        const mockExam = db.exams.find((me) => me.id === e.id);
+        if (mockExam && mockExam.questions) {
+          questions = mockExam.questions;
+        }
+      }
+      return {
+        ...e,
+        questions,
+        department: db.departments.find((d) => d.id === e.department_id),
+      };
+    });
+
+    db.exams = exams;
+    db.save();
+    return exams as T;
   }
 
   if (endpoint === '/admin/exams' && method === 'POST') {
@@ -412,20 +430,54 @@ async function handleSupabaseRequest<T>(endpoint: string, method: string, body?:
   if (endpoint === '/admin/assignments' && method === 'GET') {
     const { data, error } = await supabase
       .from('exam_assignments')
-      .select('*, user:users(*), exam:exams(*)');
+      .select('*, user:users!exam_assignments_user_id_fkey(*), exam:exams(*, questions(*))');
     if (error) throw new ApiError(error.message, 500);
-    return (data || []) as T;
+    const list = (data || []).map((a: any) => ({
+      ...a,
+      exam: a.exam ? {
+        ...a.exam,
+        department: db.departments.find((d) => d.id === a.exam.department_id),
+      } : undefined,
+    }));
+    return list as T;
+  }
+
+  if (endpoint === '/admin/assignments' && method === 'POST') {
+    const { exam_id, user_ids } = body || {};
+    const createdRows: ExamAssignment[] = (user_ids || []).map((uid: string) => ({
+      id: 'assign-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      exam_id,
+      user_id: uid,
+      assigned_by: currentUser?.userId || 'user-admin',
+      assigned_at: new Date().toISOString(),
+      status: 'assigned',
+    }));
+
+    const { error } = await supabase.from('exam_assignments').insert(createdRows);
+    if (error) console.warn('Supabase assign insert error:', error);
+
+    db.assignments.push(...createdRows);
+    db.save();
+    return createdRows as T;
   }
 
   if (endpoint === '/assignments/my' && method === 'GET') {
     const uid = currentUser?.userId || 'user-officer-1';
     const { data, error } = await supabase
       .from('exam_assignments')
-      .select('*, exam:exams(*)')
+      .select('*, exam:exams(*, questions(*))')
       .eq('user_id', uid)
       .neq('status', 'cancelled');
     if (error) throw new ApiError(error.message, 500);
-    return (data || []) as T;
+
+    const list = (data || []).map((a: any) => ({
+      ...a,
+      exam: a.exam ? {
+        ...a.exam,
+        department: db.departments.find((d) => d.id === a.exam.department_id),
+      } : undefined,
+    }));
+    return list as T;
   }
 
   if (endpoint === '/admin/results' && method === 'GET') {
